@@ -1,0 +1,254 @@
+import React, { useState } from 'react';
+import Sidebar from './components/Sidebar';
+import Header from './components/Header';
+import Overview from './components/Overview';
+import PropertiesList from './components/PropertiesList';
+import ActivitiesTimeline from './components/ActivitiesTimeline';
+import AnalyticsDash from './components/AnalyticsDash';
+import SettingsPanel from './components/SettingsPanel';
+
+// Load default mock datasets
+import { 
+  INITIAL_STATS, 
+  INITIAL_PROPERTIES, 
+  INITIAL_ACTIVITIES 
+} from './data';
+
+import { Shield } from 'lucide-react';
+
+export default function App() {
+  const [currentSection, setCurrentSection] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [investorName, setInvestorName] = useState('Жан-Пьер Сутер');
+  const [currency, setCurrency] = useState('USD');
+  
+  // Fully reactive state for global portfolio stats & ledgers
+  const [stats, setStats] = useState(INITIAL_STATS);
+  const [properties, setProperties] = useState(INITIAL_PROPERTIES);
+  const [activities, setActivities] = useState(INITIAL_ACTIVITIES);
+
+  // Core callback: Investing / acquiring additional shares from a property card
+  const handleInvestInProperty = (propertyId, quantity, cost) => {
+    // 1. Update Property holding metrics locally
+    const updatedProperties = properties.map((prop) => {
+      if (prop.id === propertyId) {
+        const extraWeight = (cost / prop.currentValuation) * 100;
+        return {
+          ...prop,
+          ownershipPercentage: prop.ownershipPercentage + extraWeight,
+          totalInvested: prop.totalInvested + cost,
+          tokensOwned: prop.tokensOwned + quantity
+        };
+      }
+      return prop;
+    });
+    setProperties(updatedProperties);
+
+    // 2. Synchronize dynamic portfolio overview cards state
+    const matchedProp = properties.find(p => p.id === propertyId);
+    if (!matchedProp) return;
+
+    const extraYieldAddition = (cost / matchedProp.currentValuation) * matchedProp.monthlyYield;
+    const previousTotalInvested = stats.totalInvested;
+    const newTotalInvested = stats.totalInvested + cost;
+
+    // Recalculately estimate weighted average portfolio ROI
+    const weightedAverageRoi = ((stats.totalInvested * stats.averageRoi) + (cost * matchedProp.roi)) / newTotalInvested;
+
+    setStats((prev) => ({
+      ...prev,
+      totalInvested: newTotalInvested,
+      currentAssetValue: prev.currentAssetValue + cost * 1.05, // simulated value margin
+      monthlyIncome: Math.round(prev.monthlyIncome + extraYieldAddition),
+      averageRoi: Number(weightedAverageRoi.toFixed(2))
+    }));
+
+    // 3. Log active shopping event to activities chronicle timeline
+    const newActivity = {
+      id: `act-buy-${Date.now()}`,
+      type: 'purchase',
+      title: `Приобретено долей: ${quantity.toLocaleString()} за ${matchedProp.name}`,
+      propertyName: matchedProp.name,
+      amount: cost,
+      date: 'Только что',
+      timestamp: new Date(),
+      status: 'completed',
+      txHash: '0x' + Math.random().toString(16).substr(2, 6).toUpperCase() + '...SEC'
+    };
+    setActivities([newActivity, ...activities]);
+  };
+
+  // Core callback: Selling / liquidating shares of a property card
+  const handleSellProperty = (propertyId, quantity, proceeds) => {
+    // 1. Update Property holding metrics locally
+    const updatedProperties = properties.map((prop) => {
+      if (prop.id === propertyId) {
+        // Since we are selling, decrease ownership percentage, total invested (or ownership value), and tokens owned
+        const soldPercentage = (quantity / (prop.currentValuation / prop.tokenPrice)) * 100;
+        const remainingTokens = Math.max(0, prop.tokensOwned - quantity);
+        const remainingPercentage = Math.max(0, prop.ownershipPercentage - soldPercentage);
+        const remainingInvested = Math.max(0, prop.totalInvested - proceeds);
+        return {
+          ...prop,
+          ownershipPercentage: remainingPercentage,
+          totalInvested: remainingInvested,
+          tokensOwned: remainingTokens
+        };
+      }
+      return prop;
+    });
+    setProperties(updatedProperties);
+
+    // 2. Synchronize dynamic stats
+    const matchedProp = properties.find(p => p.id === propertyId);
+    if (!matchedProp) return;
+
+    const lostYield = (proceeds / matchedProp.currentValuation) * matchedProp.monthlyYield;
+    const newTotalInvested = Math.max(0, stats.totalInvested - proceeds);
+    const newAssetValue = Math.max(0, stats.currentAssetValue - proceeds * 1.05);
+    const newMonthlyIncome = Math.max(0, Math.round(stats.monthlyIncome - lostYield));
+
+    // Recalculate average ROI safely
+    let newRoi = stats.averageRoi;
+    if (newTotalInvested > 0) {
+      const totalWeightedRoiSum = updatedProperties.reduce((sum, p) => sum + (p.totalInvested * p.roi), 0);
+      newRoi = Number((totalWeightedRoiSum / newTotalInvested).toFixed(2));
+    }
+
+    setStats((prev) => ({
+      ...prev,
+      totalInvested: newTotalInvested,
+      currentAssetValue: newAssetValue,
+      monthlyIncome: newMonthlyIncome,
+      averageRoi: newRoi
+    }));
+
+    // 3. Log to activities timeline
+    const newActivity = {
+      id: `act-sell-${Date.now()}`,
+      type: 'sale',
+      title: `Продано долей: ${quantity.toLocaleString()} за ${matchedProp.name}`,
+      propertyName: matchedProp.name,
+      amount: proceeds,
+      date: 'Только что',
+      timestamp: new Date(),
+      status: 'completed',
+      txHash: '0x' + Math.random().toString(16).substr(2, 6).toUpperCase() + '...SEC'
+    };
+    setActivities([newActivity, ...activities]);
+  };
+
+  // Callback to append custom manual yields broadcast simulator
+  const handleAddManualActivity = (customActivity) => {
+    setActivities([customActivity, ...activities]);
+    
+    // If it's a layout payout distribution change, increase cash statistics
+    if (customActivity.type === 'payout') {
+      setStats((prev) => ({
+        ...prev,
+        monthlyIncome: prev.monthlyIncome + customActivity.amount,
+        cashDistributions: prev.cashDistributions + customActivity.amount
+      }));
+    }
+  };
+
+  // Section Routing rendering function
+  const renderContent = () => {
+    switch (currentSection) {
+      case 'dashboard':
+        return (
+          <div className="space-y-10">
+            {/* Overview cards metrics + simulation tools */}
+            <Overview stats={stats} currency={currency} />
+
+            {/* Quick Properties highlights on main board */}
+            <div className="space-y-4 text-left">
+              <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                <div>
+                  <span className="text-[9px] uppercase tracking-wider text-gray-400 font-bold block">Объекты недвижимости</span>
+                  <h4 className="font-serif text-lg font-bold text-gray-900">Каталог активов</h4>
+                </div>
+                <button 
+                  onClick={() => setCurrentSection('properties')}
+                  className="text-xs text-[#A38D6D] hover:underline uppercase tracking-wide font-bold font-mono cursor-pointer"
+                >
+                  Посмотреть все активы →
+                </button>
+              </div>
+              <PropertiesList properties={properties.slice(0, 3)} onInvest={handleInvestInProperty} onSell={handleSellProperty} currency={currency} />
+            </div>
+
+            {/* Micro timelines preview section */}
+            <div className="space-y-4 text-left">
+              <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                <div>
+                  <span className="text-[9px] uppercase tracking-wider text-gray-400 font-bold block">Синхронизация реестра</span>
+                  <h4 className="font-serif text-lg font-bold text-gray-900">Лента хроники операций</h4>
+                </div>
+                <button 
+                  onClick={() => setCurrentSection('activity')}
+                  className="text-xs text-[#A38D6D] hover:underline uppercase tracking-wide font-bold font-mono cursor-pointer"
+                >
+                  Проверить логи реестра →
+                </button>
+              </div>
+              <ActivitiesTimeline activities={activities} onAddManualActivity={handleAddManualActivity} currency={currency} />
+            </div>
+          </div>
+        );
+      case 'properties':
+        return <PropertiesList properties={properties} onInvest={handleInvestInProperty} onSell={handleSellProperty} currency={currency} />;
+      case 'activity':
+        return <ActivitiesTimeline activities={activities} onAddManualActivity={handleAddManualActivity} currency={currency} />;
+      case 'analytics':
+        return <AnalyticsDash currency={currency} />;
+      case 'settings':
+        return <SettingsPanel investorName={investorName} currency={currency} onCurrencyChange={setCurrency} />;
+      default:
+        return (
+          <div className="py-20 text-center font-serif text-lg text-gray-500">
+            Загрузка раздела. Пожалуйста, используйте боковую панель навигации.
+          </div>
+        );
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#FDFDFB] flex font-sans text-gray-800 paper-grain relative select-none">
+      
+      {/* Sidebar Navigation Drawer */}
+      <Sidebar 
+        currentSection={currentSection} 
+        onSectionChange={setCurrentSection} 
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      {/* Main viewport Container */}
+      <div className="flex-1 flex flex-col lg:pl-72 min-w-0 transition-all duration-300">
+        
+        {/* Editorial Top header bar */}
+        <Header 
+          onMenuToggle={() => setSidebarOpen(!sidebarOpen)} 
+          investorName={investorName}
+          portfolioValue={stats.currentAssetValue}
+          currency={currency}
+        />
+
+        {/* Dynamic content scroll workspace */}
+        <main className="flex-1 p-6 lg:p-10 max-w-7xl w-full mx-auto space-y-10 overflow-y-auto">
+          {renderContent()}
+
+          {/* Persistent global regulator reassurance footer */}
+          <footer className="pt-10 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-4 text-gray-450 text-[10px] font-mono text-left">
+            <div className="flex items-center gap-2">
+              <Shield size={14} className="text-[#A38D6D]" />
+              <span>Институциональная регулируемая песочница реестра активов (v4.22)</span>
+            </div>
+          </footer>
+        </main>
+
+      </div>
+    </div>
+  );
+}
